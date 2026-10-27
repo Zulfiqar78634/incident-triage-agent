@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.agent.runtime import AgentRuntime
-from app.db import decide_approval, get_approval, list_events, load_run
+from app.db import append_event, decide_approval, get_approval, list_events, load_run, save_run
 
 router = APIRouter()
 runtime = AgentRuntime()
@@ -53,10 +53,8 @@ def cancel_run(run_id: str):
     loaded = load_run(run_id)
     if not loaded:
         raise HTTPException(status_code=404, detail="Run not found")
-    status, state = loaded
+    _, state = loaded
     state["status"] = "cancelled"
-    from app.db import save_run, append_event
-
     save_run(run_id, "cancelled", state)
     append_event(run_id, "run_cancelled", {})
     return {"run_id": run_id, "status": "cancelled"}
@@ -74,20 +72,19 @@ def read_approval(approval_id: str):
 def decide(approval_id: str, request: ApprovalDecision):
     if request.decision not in {"approved", "rejected"}:
         raise HTTPException(status_code=400, detail="decision must be approved or rejected")
+
     approval = decide_approval(approval_id, request.decision)
     if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
-    if approval["status"] == request.decision and approval.get("decided_at") is None:
-        raise HTTPException(status_code=409, detail="Approval already decided")
+    if approval["status"] not in {"approved", "rejected"}:
+        raise HTTPException(status_code=409, detail="Approval could not be updated")
 
-    state_status, state = load_run(approval["run_id"])
+    _, state = load_run(approval["run_id"])
     state["status"] = "approved" if request.decision == "approved" else "rejected"
-    from app.db import save_run, append_event
-
     save_run(approval["run_id"], state["status"], state)
     append_event(approval["run_id"], "approval_decided", {"decision": request.decision})
 
-    resumed = runtime.run_to_blocking_point(type(runtime.transitions.keys().__iter__().__next__(), )) if False else runtime.resume(approval["run_id"])
+    resumed = runtime.resume(approval["run_id"])
     resumed = runtime.run_to_blocking_point(resumed)
     return {"run_id": approval["run_id"], "status": resumed.status}
 

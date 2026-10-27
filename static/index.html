@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Incident Triage Agent</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #0b1120; color: #e2e8f0; }
+    header { padding: 20px; border-bottom: 1px solid #1e293b; }
+    main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; }
+    button { background: #2563eb; color: white; border: 0; padding: 9px 14px; border-radius: 7px; cursor: pointer; }
+    button.secondary { background: #334155; }
+    button.danger { background: #dc2626; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .event { border-left: 3px solid #2563eb; padding: 8px 12px; margin-bottom: 8px; background: #0f172a; }
+    .event.approval_requested { border-color: #f59e0b; }
+    .event.run_completed { border-color: #16a34a; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+    .row { display: flex; gap: 8px; margin-top: 10px; }
+    input { padding: 9px; border-radius: 7px; border: 1px solid #334155; background: #0f172a; color: inherit; width: 100%; }
+    h1 { font-size: 20px; margin: 0; }
+    h2 { font-size: 15px; margin-top: 0; }
+    .muted { color: #94a3b8; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Incident Triage Agent</h1>
+    <p class="muted">Durable agent runtime · tool orchestration · human-in-the-loop remediation</p>
+  </header>
+  <main>
+    <section class="card">
+      <h2>Start triage</h2>
+      <label class="muted" for="alert">Alert ID</label>
+      <input id="alert" value="ALERT-001" />
+      <div class="row">
+        <button onclick="startRun()">Start agent</button>
+        <button class="secondary" onclick="resumeRun()">Resume</button>
+        <button class="danger" onclick="cancelRun()">Cancel</button>
+      </div>
+      <div id="approval" style="display:none; margin-top:18px">
+        <h2>Approval required</h2>
+        <p class="muted">The agent proposes a production-impacting restart.</p>
+        <div class="row">
+          <button onclick="decide('approved')">Approve restart</button>
+          <button class="secondary" onclick="decide('rejected')">Reject & escalate</button>
+        </div>
+      </div>
+      <div id="summary" style="margin-top:18px"></div>
+    </section>
+    <section class="card">
+      <h2>Execution trace</h2>
+      <div id="events"><p class="muted">No active run.</p></div>
+    </section>
+  </main>
+  <script>
+    let runId = null;
+    let approvalId = null;
+
+    async function startRun() {
+      const alertId = document.getElementById('alert').value;
+      const res = await fetch('/api/incidents', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({alert_id: alertId})
+      });
+      const data = await res.json();
+      runId = data.run_id;
+      await refresh();
+    }
+
+    async function resumeRun() {
+      if (!runId) return;
+      await fetch(`/api/runs/${runId}/resume`, {method: 'POST'});
+      await refresh();
+    }
+
+    async function cancelRun() {
+      if (!runId) return;
+      await fetch(`/api/runs/${runId}/cancel`, {method: 'POST'});
+      await refresh();
+    }
+
+    async function decide(decision) {
+      if (!approvalId) return;
+      await fetch(`/api/approvals/${approvalId}/decision`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({decision})
+      });
+      await refresh();
+    }
+
+    async function refresh() {
+      if (!runId) return;
+      const res = await fetch(`/api/runs/${runId}`);
+      const data = await res.json();
+      const state = data.state;
+      approvalId = state.approval_id;
+      document.getElementById('approval').style.display =
+        data.status === 'awaiting_approval' ? 'block' : 'none';
+
+      document.getElementById('summary').innerHTML = `
+        <h2>Current state</h2>
+        <p><b>Status:</b> ${data.status}</p>
+        <p><b>Diagnosis:</b> ${state.diagnosis || 'Pending'}</p>
+        <p><b>Confidence:</b> ${state.confidence}</p>
+        <p><b>Actions:</b> ${state.actions_taken.join(', ') || 'None'}</p>
+      `;
+
+      document.getElementById('events').innerHTML = data.events.map(event => `
+        <div class="event ${event.type}">
+          <b>${event.type}</b>
+          <pre>${JSON.stringify(event.payload, null, 2)}</pre>
+        </div>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
