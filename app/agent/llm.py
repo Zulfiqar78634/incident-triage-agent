@@ -1,22 +1,23 @@
-"""LLM adapter with a deterministic offline mode.
+"""LLM adapter using Google Gemini, with deterministic offline mode.
 
 The service works without an API key so reviewers can run it immediately.
-Setting OPENAI_API_KEY switches diagnosis to a real model.
+Setting GEMINI_API_KEY switches diagnosis to a real Gemini model.
 """
 
 import json
 import os
+
 from app.agent.prompts import DIAGNOSIS_PROMPT, SYSTEM_PROMPT
 from app.agent.runtime import compact_context, extract_json
 
 
 def generate_diagnosis(state, memory: list[dict]) -> dict:
-    if not os.getenv("OPENAI_API_KEY"):
+    if not os.getenv("GEMINI_API_KEY"):
         return _mock_diagnosis(state)
 
-    from openai import OpenAI
+    from google import genai
 
-    client = OpenAI()
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     prompt = DIAGNOSIS_PROMPT.format(
         service=state.service,
         alert=state.alert_message,
@@ -24,16 +25,17 @@ def generate_diagnosis(state, memory: list[dict]) -> dict:
         evidence=compact_context(state),
         memory=json.dumps(memory, indent=2) if memory else "None",
     )
-    response = client.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.1,
-        response_format={"type": "json_object"},
+
+    response = client.models.generate_content(
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        contents=prompt,
+        config={
+            "system_instruction": SYSTEM_PROMPT,
+            "temperature": 0.1,
+            "response_mime_type": "application/json",
+        },
     )
-    return extract_json(response.choices[0].message.content or "{}")
+    return extract_json(response.text or "{}")
 
 
 def _mock_diagnosis(state) -> dict:

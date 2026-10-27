@@ -1,6 +1,6 @@
 # Incident Triage Agent
 
-An end-to-end AI agent that triages platform incidents: it plans an investigation, calls observability tools, compacts evidence, diagnoses the incident, and either takes a safe action or pauses for operator approval before restarting a production service.
+An end-to-end AI agent that triages platform incidents: it plans an investigation, calls observability tools, compacts evidence, diagnoses the incident using Google Gemini, and either takes a safe action or pauses for operator approval before restarting a production service.
 
 It is a working FastAPI application with a browser-based operator UI, persistent agent state, resumable runs, tool retries, execution tracing, and an offline golden-set evaluation harness.
 
@@ -24,7 +24,7 @@ FastAPI backend
 Agent runtime
    |-- Plan
    |-- Investigate (parallel tools + retry/backoff)
-   |-- Diagnose (bounded context + long-term memory)
+   |-- Diagnose (Gemini + bounded context + long-term memory)
    |-- Approval gate
    |-- Execute / escalate
    |-- Report + write memory
@@ -38,7 +38,7 @@ SQLite checkpoints, event trace, approvals, long-term memory
 2. Create an investigation plan.
 3. Query metrics, logs, and the relevant runbook.
 4. Compact tool output into evidence rather than passing raw logs to the model.
-5. Diagnose the incident with a confidence score.
+5. Diagnose the incident with Gemini and a confidence score.
 6. Route to a safe action, a ticket, or a human approval gate.
 7. Resume from the persisted checkpoint after approval or rejection.
 8. Report actions and store a compact resolution in long-term memory.
@@ -48,6 +48,7 @@ SQLite checkpoints, event trace, approvals, long-term memory
 ### Requirements
 
 - Python 3.11+
+- Optional: Google Gemini API key
 
 ### Setup
 
@@ -65,12 +66,14 @@ Open:
 http://127.0.0.1:8000
 ```
 
-The application runs immediately in deterministic `MOCK_LLM` mode. To use a real model, add your key to `.env`:
+The application runs immediately in deterministic `MOCK_LLM` mode. To use Gemini, add your key to `.env`:
 
 ```env
-OPENAI_API_KEY=your-key
-OPENAI_MODEL=gpt-4o-mini
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-2.5-flash
 ```
+
+Get an API key from Google AI Studio: https://aistudio.google.com/apikey
 
 ### Run tests
 
@@ -106,7 +109,7 @@ curl -X POST http://127.0.0.1:8000/api/incidents \
 
 ## Context engineering
 
-The agent does not send an entire transcript or raw log file to the model.
+The agent does not send an entire transcript or raw log file to Gemini.
 
 - Each tool result is reduced to a bounded evidence finding.
 - The runbook retriever returns the strongest match and a limited excerpt.
@@ -158,7 +161,7 @@ The UI renders this trace so an operator can inspect the agent’s plan, evidenc
 
 ## What I would build next
 
-- OpenTelemetry GenAI-compatible spans for LLM, tool, and agent steps
+- OpenTelemetry GenAI-compatible spans for Gemini, tool, and agent steps
 - Token, cost, and latency budgets with alerting
 - Embedding-based runbook retrieval with relevance thresholds
 - Prompt-injection screening and output validation
