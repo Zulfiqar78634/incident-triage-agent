@@ -20,6 +20,7 @@ from app.db import append_event, create_approval, load_run, remember_resolution,
 
 MAX_TOOL_ATTEMPTS = 3
 MAX_CONTEXT_CHARS = 6000
+TERMINAL_STATUSES = {"awaiting_approval", "reported", "completed", "cancelled", "failed"}
 
 
 class AgentRuntime:
@@ -76,7 +77,7 @@ class AgentRuntime:
 
     def run_to_blocking_point(self, state: AgentState) -> AgentState:
         for _ in range(20):
-            if state.status in {"awaiting_approval", "reported", "failed"}:
+            if state.status in TERMINAL_STATUSES:
                 return state
             state = self.step(state)
         state.status = "failed"
@@ -100,7 +101,6 @@ class AgentRuntime:
         return state
 
     def _investigate(self, state: AgentState) -> AgentState:
-        # Parallel fan-out with per-tool retry and bounded backoff.
         calls = [
             ("query_metrics", {"service": state.service}),
             ("query_logs", {"service": state.service, "minutes": 30}),
@@ -125,8 +125,6 @@ class AgentRuntime:
                     {"tool": tool_name, "attempt": attempt_number, "error": result.error},
                 )
                 time.sleep(0.05 * attempt_number)
-            else:
-                continue
 
         failed = [name for name, item in state.tool_attempts.items() if item.status == "failed"]
         if failed:
@@ -200,7 +198,6 @@ class AgentRuntime:
         return state
 
     def _await_approval(self, state: AgentState) -> AgentState:
-        # Blocking checkpoint. The run can be safely restarted after backend failure.
         return state
 
     def _execute_action(self, state: AgentState) -> AgentState:
