@@ -1,0 +1,12 @@
+{
+  "ALERT-001": {
+    "service": "payments-api",
+    "severity": "critical",
+    "message": "High 5xx error rate and elevated memory usage detected"
+  },
+  "ALERT-002": {
+    "service": "checkout-service",
+    "severity": "warning",
+    "message": "Latency above objective for five minutes"
+  }
+}

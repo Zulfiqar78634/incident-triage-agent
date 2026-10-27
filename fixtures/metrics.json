@@ -1,0 +1,14 @@
+{
+  "payments-api": {
+    "error_rate": 0.18,
+    "p99_latency_ms": 2400,
+    "memory_usage_percent": 94,
+    "cpu_usage_percent": 78
+  },
+  "checkout-service": {
+    "error_rate": 0.02,
+    "p99_latency_ms": 1150,
+    "memory_usage_percent": 61,
+    "cpu_usage_percent": 44
+  }
+}

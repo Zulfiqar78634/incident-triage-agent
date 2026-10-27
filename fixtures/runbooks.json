@@ -1,0 +1,12 @@
+[
+  {
+    "title": "payments-api high 5xx and memory pressure",
+    "keywords": "payments-api 5xx memory oom restart",
+    "content": "When payments-api shows sustained 5xx errors with memory usage above 90 percent, first verify upstream dependencies. If dependency health is normal and memory remains high, perform a controlled service restart. If symptoms recur within 30 minutes, escalate to the owning team and create an incident ticket."
+  },
+  {
+    "title": "checkout-service latency degradation",
+    "keywords": "checkout-service latency database connection pool",
+    "content": "For checkout-service latency, inspect database connection-pool saturation and downstream dependency latency. Do not restart unless CPU or memory is saturated. Create a ticket if pool saturation persists."
+  }
+]

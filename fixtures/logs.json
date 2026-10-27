@@ -1,0 +1,11 @@
+{
+  "payments-api": [
+    {"timestamp": "2026-10-28T00:01:00Z", "level": "INFO", "message": "Request completed"},
+    {"timestamp": "2026-10-28T00:02:00Z", "level": "ERROR", "message": "OutOfMemoryError: unable to allocate object heap"},
+    {"timestamp": "2026-10-28T00:03:00Z", "level": "ERROR", "message": "Upstream timeout while calling ledger-service"}
+  ],
+  "checkout-service": [
+    {"timestamp": "2026-10-28T00:01:00Z", "level": "INFO", "message": "Checkout flow started"},
+    {"timestamp": "2026-10-28T00:04:00Z", "level": "WARN", "message": "Database connection pool near capacity"}
+  ]
+}
