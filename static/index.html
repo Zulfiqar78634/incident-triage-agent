@@ -1,120 +1,38 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Incident Triage Agent</title>
-  <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    body { margin: 0; background: #0b1120; color: #e2e8f0; }
-    header { padding: 20px; border-bottom: 1px solid #1e293b; }
-    main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px; }
-    .card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; }
-    button { background: #2563eb; color: white; border: 0; padding: 9px 14px; border-radius: 7px; cursor: pointer; }
-    button.secondary { background: #334155; }
-    button.danger { background: #dc2626; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    .event { border-left: 3px solid #2563eb; padding: 8px 12px; margin-bottom: 8px; background: #0f172a; }
-    .event.approval_requested { border-color: #f59e0b; }
-    .event.run_completed { border-color: #16a34a; }
-    pre { white-space: pre-wrap; word-break: break-word; }
-    .row { display: flex; gap: 8px; margin-top: 10px; }
-    input { padding: 9px; border-radius: 7px; border: 1px solid #334155; background: #0f172a; color: inherit; width: 100%; }
-    h1 { font-size: 20px; margin: 0; }
-    h2 { font-size: 15px; margin-top: 0; }
-    .muted { color: #94a3b8; font-size: 13px; }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Incident Triage Agent</h1>
-    <p class="muted">Durable agent runtime · tool orchestration · human-in-the-loop remediation</p>
-  </header>
-  <main>
-    <section class="card">
-      <h2>Start triage</h2>
-      <label class="muted" for="alert">Alert ID</label>
-      <input id="alert" value="ALERT-001" />
-      <div class="row">
-        <button onclick="startRun()">Start agent</button>
-        <button class="secondary" onclick="resumeRun()">Resume</button>
-        <button class="danger" onclick="cancelRun()">Cancel</button>
-      </div>
-      <div id="approval" style="display:none; margin-top:18px">
-        <h2>Approval required</h2>
-        <p class="muted">The agent proposes a production-impacting restart.</p>
-        <div class="row">
-          <button onclick="decide('approved')">Approve restart</button>
-          <button class="secondary" onclick="decide('rejected')">Reject & escalate</button>
-        </div>
-      </div>
-      <div id="summary" style="margin-top:18px"></div>
-    </section>
-    <section class="card">
-      <h2>Execution trace</h2>
-      <div id="events"><p class="muted">No active run.</p></div>
-    </section>
-  </main>
-  <script>
-    let runId = null;
-    let approvalId = null;
-
-    async function startRun() {
-      const alertId = document.getElementById('alert').value;
-      const res = await fetch('/api/incidents', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({alert_id: alertId})
-      });
-      const data = await res.json();
-      runId = data.run_id;
-      await refresh();
-    }
-
-    async function resumeRun() {
-      if (!runId) return;
-      await fetch(`/api/runs/${runId}/resume`, {method: 'POST'});
-      await refresh();
-    }
-
-    async function cancelRun() {
-      if (!runId) return;
-      await fetch(`/api/runs/${runId}/cancel`, {method: 'POST'});
-      await refresh();
-    }
-
-    async function decide(decision) {
-      if (!approvalId) return;
-      await fetch(`/api/approvals/${approvalId}/decision`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({decision})
-      });
-      await refresh();
-    }
-
-    async function refresh() {
-      if (!runId) return;
-      const res = await fetch(`/api/runs/${runId}`);
-      const data = await res.json();
-      const state = data.state;
-      approvalId = state.approval_id;
-      document.getElementById('approval').style.display =
-        data.status === 'awaiting_approval' ? 'block' : 'none';
-
-      document.getElementById('summary').innerHTML = `
-        <h2>Current state</h2>
-        <p><b>Status:</b> ${data.status}</p>
-        <p><b>Diagnosis:</b> ${state.diagnosis || 'Pending'}</p>
-        <p><b>Confidence:</b> ${state.confidence}</p>
-        <p><b>Actions:</b> ${state.actions_taken.join(', ') || 'None'}</p>
-      `;
-
-      document.getElementById('events').innerHTML = data.events.map(event => `
-        <div class="event ${event.type}">
-          <b>${event.type}</b>
-          <pre>${JSON.stringify(event.payload, null, 2)}</pre>
-        </div>
-      `).join('');
-    }
-  </script>
-</body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IncidentIQ • Mission Control</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;color:#e7eeff;background:#070c18}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 70% 0,#21346b66,transparent 60%),#070c18;min-height:100vh}header{display:flex;justify-content:space-between;gap:16px;padding:22px 4%;border-bottom:1px solid #263654}h1{font-size:24px;margin:0}h2{font-size:17px;margin:0 0 14px}p{line-height:1.6}.muted,small{color:#9baccc;font-size:12px}.badge{border:1px solid #40557a;background:#172540;padding:8px 12px;border-radius:24px;font-size:12px}main{max-width:1550px;margin:auto;padding:24px 4%}.layout{display:grid;grid-template-columns:300px minmax(0,1fr);gap:20px}.stack{display:flex;flex-direction:column;gap:18px}.card{border:1px solid #293957;border-radius:18px;padding:21px;background:linear-gradient(140deg,#142039dd,#0c1426ee);box-shadow:0 16px 45px #0003}label{display:block;font-size:12px;color:#a8b8d6;margin:14px 0 7px}input{width:100%;background:#080f1e;color:inherit;border:1px solid #3b4e71;border-radius:9px;padding:12px}button{font:inherit;background:#527eff;color:white;border:1px solid transparent;border-radius:9px;padding:10px 13px;cursor:pointer}button:hover:not(:disabled){filter:brightness(1.2)}button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid #8de9ff;outline-offset:3px}.primary{width:100%;margin-top:14px;background:linear-gradient(100deg,#4e7dff,#8d5bf1)}.secondary{background:#263854}.danger{background:#6b2a40}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.value{font-size:21px;margin-top:8px;overflow-wrap:anywhere}.scene{perspective:900px;height:350px;overflow:hidden;position:relative;border-radius:14px;background:radial-gradient(ellipse at center,#15385455,transparent 65%),#080f20}.world{position:absolute;inset:22px;transform-style:preserve-3d;transform:rotateX(24deg) rotateY(-13deg);transition:transform .3s}.floor{position:absolute;inset:25px;background-image:linear-gradient(#2b456244 1px,transparent 1px),linear-gradient(90deg,#2b456244 1px,transparent 1px);background-size:28px 28px;transform:translateZ(-45px);border:1px solid #2c5275}.nodes{height:100%;display:grid;grid-template-columns:repeat(3,1fr);gap:26px;align-content:center;padding:15px;transform-style:preserve-3d}.node{background:linear-gradient(135deg,#182d4d,#0e1930);border:1px solid #496895;box-shadow:0 12px 0 #060e21,0 18px 25px #0008;transform:translateZ(15px);min-height:80px;transition:transform .3s,box-shadow .3s}.node:hover,.node:focus-visible{transform:translateZ(45px)}.node.done{border-color:#44d7ba;box-shadow:0 12px 0 #06362f,0 0 24px #31caa12b}.node.wait{border-color:#ffcd72;box-shadow:0 12px 0 #4d3611,0 0 25px #e6a43a33}.node small{display:block;margin-top:7px}.flat .world{transform:none!important}.flat .node{transform:none;box-shadow:none}.flat .floor{transform:none}.heading{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:15px}.heading h2{margin:0}.approval{border-color:#b68a3f;background:linear-gradient(130deg,#362a15,#171e30)}.hidden{display:none!important}.meter{height:8px;background:#263955;border-radius:8px;overflow:hidden;margin:17px 0}.meter div{height:100%;width:0;background:linear-gradient(90deg,#6a7fff,#40dfbf);transition:width .4s}.event{border-left:2px solid #608bff;margin-left:6px;padding:4px 0 16px 16px;font-size:13px}summary{cursor:pointer;color:#9fb5db;margin-top:8px;font-size:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#070e1b;padding:14px;border-radius:10px;font-size:12px}#events{max-height:420px;overflow:auto}#notice{padding:13px;border:1px solid #557aad;border-radius:10px;margin-bottom:18px;background:#172944}#notice.error{border-color:#c25d77;background:#361b28}#node-detail{min-height:45px}#run-id{overflow-wrap:anywhere}.intro{margin-bottom:20px}.intro h2{font-size:27px}.warning{color:#ffd28b}.success{color:#76e3bd}@media(max-width:950px){.layout{grid-template-columns:1fr}}@media(max-width:580px){header{flex-direction:column}.stats{grid-template-columns:1fr}.scene{height:370px}.nodes{gap:15px;padding:4px}.node{font-size:11px;padding:8px}.world{inset:10px}main{padding:18px 3%}}@media(prefers-reduced-motion:reduce){*{transition:none!important}.world{transform:none!important}.node{transform:none!important;box-shadow:none!important}}
+</style></head><body>
+<header><div><h1>◈ IncidentIQ</h1><small>Agentic operations · Evidence-driven decisions · Human control</small></div><span class="badge" id="health">Connecting…</span></header>
+<main><div class="intro"><h2>Incident mission control</h2><small>Interactive workflow visualization · Local observability-tool demonstration</small></div><div id="notice" role="status" class="hidden"></div>
+<div class="layout"><aside class="stack"><section class="card"><h2>Launch investigation</h2><label for="alert">Alert ID</label><input id="alert" value="ALERT-001"><button id="start" class="primary">Start investigation →</button><div class="row"><button id="resume" class="secondary needs-run" disabled>Resume</button><button id="cancel" class="danger needs-run" disabled>Cancel</button></div><label for="restore">Recover run by ID</label><input id="restore" placeholder="Paste an existing run ID"><div class="row"><button id="load" class="secondary">Load run</button></div></section>
+<section class="card"><h2>Gemini execution</h2><span id="mode" class="badge">Not verified</span><p id="model" class="muted">Reading backend configuration…</p><p id="llm-status" class="muted">No run selected. Configuration is not proof of a completed model call.</p><small>API keys stay on the server. Mock rules are never labelled as live Gemini.</small></section>
+<section class="card"><h2>Run record</h2><p id="run-id" class="muted">No active run</p><button id="export" class="secondary needs-run" disabled>Export JSON</button><p class="muted">Reported confidence is not calibrated accuracy. Tool actions in this project are demonstration integrations; this graph is workflow topology, not discovered infrastructure.</p></section></aside>
+<div class="stack"><div class="stats"><section class="card"><small>STATUS</small><div id="status" class="value">Ready</div></section><section class="card"><small>SERVICE</small><div id="service" class="value">—</div></section><section class="card"><small>REPORTED CONFIDENCE</small><div id="confidence" class="value">—</div></section></div>
+<section class="card"><div class="heading"><h2>Spatial investigation map</h2><button id="view" class="secondary" aria-pressed="false">Use 2D view</button></div><div class="scene" id="scene"><div class="world" id="world"><div class="floor"></div><div class="nodes" id="nodes"></div></div></div><p class="muted" id="node-detail">Select a node to inspect actual evidence. Tilt follows your pointer; keyboard and 2D modes remain available.</p></section>
+<section id="approval" class="card approval hidden"><h2>Authorization checkpoint</h2><p>The agent proposes a service restart. Review evidence and diagnosis before approving.</p><div class="row"><button id="approve">Approve restart</button><button id="reject" class="secondary">Reject & escalate</button></div></section>
+<section class="card"><h2>Diagnostic assessment</h2><p id="diagnosis">Start an investigation to inspect findings.</p><div class="meter"><div id="bar"></div></div><p id="actions" class="muted">Actions taken: none</p><details><summary>Investigation evidence</summary><pre id="evidence">No evidence yet.</pre></details></section>
+<section class="card"><div class="heading"><h2>Execution timeline</h2><span id="count" class="badge">0 events</span></div><small>Events are persisted backend records. This view does not simulate live progress during a blocking start request.</small><div id="events"><p class="muted">No active run.</p></div></section></div></div></main>
+<script>
+const $=id=>document.getElementById(id);let runId=null,approvalId=null,latest=null,busy=false,refreshing=false;
+const nodes=[['Alert','run_started'],['Metrics','investigation_complete'],['Logs','investigation_complete'],['Runbook','investigation_complete'],['Diagnosis','diagnosis_created'],['Authorization','approval_decided']];
+const pretty=s=>String(s||'').replaceAll('_',' ');
+function notice(s,error=false){$('notice').textContent=s;$('notice').className=error?'error':'';}
+async function api(path,method='GET',body){const opt={method};if(body!==undefined){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(body);}const r=await fetch(path,opt);const text=await r.text();let d;try{d=JSON.parse(text||'{}');}catch{d={detail:'Unexpected backend response'};}if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d));return d;}
+function buttons(){document.querySelectorAll('.needs-run').forEach(b=>b.disabled=busy||!runId);$('start').disabled=busy;$('load').disabled=busy;$('approve').disabled=busy||!approvalId;$('reject').disabled=busy||!approvalId;$('start').textContent=busy?'Working…':'Start investigation →';}
+async function perform(fn){if(busy)return;busy=true;buttons();try{await fn();}catch(e){notice(e.message,true);}finally{busy=false;buttons();}}
+function map(data){const events=data?.events||[],state=data?.state||{},types=new Set(events.map(e=>e.type));$('nodes').replaceChildren();nodes.forEach(([name,event],i)=>{const b=document.createElement('button');const waiting=i===5&&data?.status==='awaiting_approval';b.className='node'+(waiting?' wait':types.has(event)?' done':'');const label=document.createElement('div');label.textContent=name;const sub=document.createElement('small');sub.textContent=waiting?'Approval pending':types.has(event)?'Recorded':'Not recorded';b.append(label,sub);b.onclick=()=>{let payload;if(i>=1&&i<=3){const source=['','query_metrics','query_logs','search_runbook'][i];payload=(state.evidence||[]).filter(e=>e.source===source);}else{payload=events.filter(e=>e.type===event||(i===5&&e.type==='approval_requested')).map(e=>e.payload);}$('node-detail').textContent=name+': '+(payload?.length?JSON.stringify(payload):'No matching evidence recorded.');};$('nodes').append(b);});}
+function render(d){latest=d;const s=d.state||{},ev=d.events||[];approvalId=d.status==='awaiting_approval'?s.approval_id:null;$('run-id').textContent=runId;$('status').textContent=pretty(d.status);$('service').textContent=s.service||'—';$('diagnosis').textContent=s.diagnosis||'Pending diagnosis';const c=Number(s.confidence||0);$('confidence').textContent=s.diagnosis?(c*100).toFixed(0)+'%':'—';$('bar').style.width=Math.max(0,Math.min(100,c*100))+'%';$('actions').textContent='Actions taken: '+((s.actions_taken||[]).map(x=>typeof x==='string'?x:JSON.stringify(x)).join(', ')||'none');$('evidence').textContent=JSON.stringify(s.evidence||[],null,2);$('approval').classList.toggle('hidden',!approvalId);$('count').textContent=ev.length+' events';$('events').replaceChildren();ev.forEach((e,i)=>{const row=document.createElement('div');row.className='event';const h=document.createElement('div');h.textContent=String(i+1).padStart(2,'0')+' · '+pretty(e.type);const detail=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent='Inspect event data';pre.textContent=JSON.stringify(e.payload,null,2);detail.append(summary,pre);row.append(h,detail);$('events').append(row);});const modelEvents=ev.filter(e=>['llm_started','llm_completed','llm_failed'].includes(e.type)),last=modelEvents.at(-1);if(last){const p=last.payload||{};$('mode').textContent=p.mode==='gemini'?'Gemini':'Offline mock rules';$('model').textContent=p.model||'No external model';$('llm-status').textContent=pretty(last.type)+' · '+(p.latency_ms??'—')+' ms'+(p.total_tokens!=null?' · '+p.total_tokens+' tokens':'')+(p.message?' · '+p.message:'');$('llm-status').className=last.type==='llm_failed'?'warning':'muted';}else{$('mode').textContent='Run mode unknown';$('llm-status').textContent='This run has no model execution metadata.';}map(d);buttons();}
+async function refresh(){if(!runId||refreshing)return;refreshing=true;const id=runId;try{const d=await api('/api/runs/'+encodeURIComponent(id));if(id===runId)render(d);}finally{refreshing=false;}}
+$('start').onclick=()=>perform(async()=>{const id=$('alert').value.trim();if(!id)throw Error('Enter an alert ID');notice('Investigation running. Waiting for backend results…');const d=await api('/api/incidents','POST',{alert_id:id});if(!d.run_id)throw Error('No run ID returned');runId=d.run_id;await refresh();notice('Investigation results loaded.');});
+$('load').onclick=()=>perform(async()=>{const id=$('restore').value.trim();if(!id)throw Error('Enter a run ID');const d=await api('/api/runs/'+encodeURIComponent(id));runId=id;render(d);notice('Run recovered.');});
+for(const action of ['resume','cancel'])$(action).onclick=()=>perform(async()=>{await api('/api/runs/'+encodeURIComponent(runId)+'/'+action,'POST');await refresh();notice(pretty(action)+' request processed.');});
+async function decide(decision){if(!approvalId)return;await api('/api/approvals/'+encodeURIComponent(approvalId)+'/decision','POST',{decision});await refresh();notice('Decision recorded. Inspect resulting actions.');}
+$('approve').onclick=()=>perform(()=>decide('approved'));$('reject').onclick=()=>perform(()=>decide('rejected'));
+$('export').onclick=()=>{if(!latest)return;const url=URL.createObjectURL(new Blob([JSON.stringify(latest,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='incident-'+runId+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+$('view').onclick=()=>{const flat=$('scene').classList.toggle('flat');$('view').setAttribute('aria-pressed',String(flat));$('view').textContent=flat?'Use 3D view':'Use 2D view';};
+$('scene').onpointermove=e=>{if(matchMedia('(prefers-reduced-motion: reduce)').matches||e.pointerType==='touch')return;const r=$('scene').getBoundingClientRect();$('world').style.transform='rotateX('+(15+(e.clientY-r.top)/r.height*15)+'deg) rotateY('+(-15+(e.clientX-r.left)/r.width*30)+'deg)';};$('scene').onpointerleave=()=>{$('world').style.transform='';};
+async function health(){try{await api('/api/health');$('health').textContent='● Backend connected';}catch{$('health').textContent='○ Backend unavailable';}}
+async function config(){try{const d=await api('/api/model');if(!runId){$('mode').textContent=d.configured_mode==='gemini'?'Gemini configured':'Offline mock configured';$('model').textContent=d.model||'No external model';}}catch{$('model').textContent='Model configuration unavailable';}}
+map(null);health();config();setInterval(health,15000);setInterval(()=>{if(runId&&!busy)refresh().catch(e=>notice(e.message,true));},2500);
+</script></body></html>
