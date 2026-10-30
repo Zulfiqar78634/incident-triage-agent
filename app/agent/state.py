@@ -9,11 +9,16 @@ class Evidence(BaseModel):
     severity: str = "info"
 
 
-class ToolAttempt(BaseModel):
+class StepRecord(BaseModel):
+    """One investigation step: what the model asked for and what came back."""
+
+    n: int
     tool: str
-    status: str
-    attempts: int = 0
-    error: str | None = None
+    args: dict = Field(default_factory=dict)
+    ok: bool
+    observation: str
+    reason: str = ""
+    attempts: int = 1
 
 
 class AgentState(BaseModel):
@@ -26,12 +31,17 @@ class AgentState(BaseModel):
     plan: list[str] = Field(default_factory=list)
     hypotheses: list[str] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
-    tool_attempts: dict[str, ToolAttempt] = Field(default_factory=dict)
+    steps: list[StepRecord] = Field(default_factory=list)
     diagnosis: str = ""
     confidence: float = 0.0
     proposed_action: str | None = None
     approval_id: str | None = None
     actions_taken: list[str] = Field(default_factory=list)
     status: str = "created"
-    context_tokens_used: int = 0
-    retries: int = 0
+    # Budgets: persisted so they survive restarts and resumes.
+    step_count: int = 0
+    tokens_used: int = 0
+    elapsed_s: float = 0.0
+    repeat_count: int = 0
+    bad_decisions: int = 0
+    stop_reason: str | None = None

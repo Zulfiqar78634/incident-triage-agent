@@ -1,8 +1,11 @@
 """Durable incident-triage agent runtime.
 
-The control flow is explicit and checkpointed. The LLM performs diagnosis and
-communication; deterministic policy controls tool retries, context compaction,
-and the human-approval gate. This keeps a non-deterministic system inspectable.
+Two layers. The lifecycle (plan -> investigate -> diagnose -> approval -> act ->
+report) is an explicit, checkpointed state machine. Inside the investigate phase
+the LLM drives a bounded plan/act/observe/replan loop: each turn it picks one
+read-only tool from the real schemas, sees a compacted result, and either
+continues or finishes. Every turn is one checkpointed step, so a run can resume
+mid-investigation. Deterministic policy owns retries, budgets and the approval gate.
 """
 
 import json
@@ -12,19 +15,29 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable
 
-from app.agent.llm import generate_diagnosis
-from app.agent.prompts import SYSTEM_PROMPT
-from app.agent.state import AgentState, Evidence, ToolAttempt
-from app.agent.tools import execute_tool
+from app.agent.context import summarize_tool_result
+from app.agent.llm import LLM, get_llm
+from app.agent.state import AgentState, Evidence, StepRecord
+from app.agent.tools import execute_tool, selectable_tool_schemas
 from app.db import append_event, create_approval, load_run, remember_resolution, save_run
 
 MAX_TOOL_ATTEMPTS = 3
 MAX_CONTEXT_CHARS = 6000
-TERMINAL_STATUSES = {"awaiting_approval", "reported", "completed", "cancelled", "failed"}
+# Investigation budgets. The first one reached ends the loop (see state.stop_reason).
+MAX_STEPS = 8
+MAX_SECONDS = 60.0
+MAX_TOKENS = 20000      # soft: checked after every LLM turn, so one call can cross it
+MAX_REPEATS = 2          # identical successful calls tolerated before stopping
+MAX_BAD_DECISIONS = 2    # invalid or unusable model turns tolerated
+MAX_TRANSITIONS = 40     # hard cap on state-machine transitions per execution
+# States where run_to_blocking_point stops: finished, or waiting on a human.
+TERMINAL_STATUSES = {"awaiting_approval", "completed", "cancelled", "failed"}
 
 
 class AgentRuntime:
-    def __init__(self) -> None:
+    def __init__(self, llm: LLM | None = None, sleep: Callable[[float], None] = time.sleep) -> None:
+        self._llm = llm
+        self.sleep = sleep
         self.transitions: dict[str, Callable[[AgentState], AgentState]] = {
             "created": self._plan,
             "planned": self._investigate,
@@ -38,6 +51,10 @@ class AgentRuntime:
             "action_complete": self._report,
             "reported": self._finish,
         }
+
+    @property
+    def llm(self) -> LLM:
+        return self._llm or get_llm()
 
     def start(self, alert_id: str) -> AgentState:
         run_id = str(uuid.uuid4())
@@ -71,12 +88,14 @@ class AgentRuntime:
         handler = self.transitions.get(state.status)
         if not handler:
             return state
+        started = time.monotonic()
         state = handler(state)
+        state.elapsed_s += time.monotonic() - started
         self._persist(state)
         return state
 
     def run_to_blocking_point(self, state: AgentState) -> AgentState:
-        for _ in range(20):
+        for _ in range(MAX_TRANSITIONS):
             if state.status in TERMINAL_STATUSES:
                 return state
             state = self.step(state)
@@ -90,9 +109,8 @@ class AgentRuntime:
 
     def _plan(self, state: AgentState) -> AgentState:
         state.plan = [
-            f"Fetch metrics for {state.service}",
-            f"Inspect recent logs for {state.service}",
-            "Retrieve the most relevant runbook",
+            f"Investigate {state.service} with read-only tools chosen by the model "
+            f"(max {MAX_STEPS} steps, {int(MAX_SECONDS)}s, {MAX_TOKENS} tokens)",
             "Diagnose using compact evidence",
             "Choose a safe remediation or escalate",
         ]
@@ -100,59 +118,128 @@ class AgentRuntime:
         append_event(state.run_id, "plan_created", {"plan": state.plan})
         return state
 
-    def _investigate(self, state: AgentState) -> AgentState:
-        calls = [
-            ("query_metrics", {"service": state.service}),
-            ("query_logs", {"service": state.service, "minutes": 30}),
-            ("search_runbook", {"query": f"{state.service} {state.alert_message}"}),
-        ]
-        for tool_name, args in calls:
-            attempt = state.tool_attempts.get(tool_name, ToolAttempt(tool=tool_name, status="pending"))
-            for attempt_number in range(1, MAX_TOOL_ATTEMPTS + 1):
-                result = execute_tool(tool_name, args)
-                attempt.attempts = attempt_number
-                if result.ok:
-                    attempt.status = "success"
-                    state.tool_attempts[tool_name] = attempt
-                    self._add_compact_evidence(state, tool_name, result.data)
-                    break
-                attempt.status = "retrying" if attempt_number < MAX_TOOL_ATTEMPTS else "failed"
-                attempt.error = result.error
-                state.tool_attempts[tool_name] = attempt
-                append_event(
-                    state.run_id,
-                    "tool_retry",
-                    {"tool": tool_name, "attempt": attempt_number, "error": result.error},
-                )
-                time.sleep(0.05 * attempt_number)
+    def _llm_call(self, state: AgentState, kind: str, fn: Callable):
+        """Run one LLM turn with tracing; returns (value, meta) or (None, meta) on failure."""
+        llm = self.llm
+        meta = {"kind": kind, "mode": llm.mode, "model": llm.model, "provider": "google" if llm.mode == "gemini" else None}
+        append_event(state.run_id, "llm_started", dict(meta))
+        started = time.perf_counter()
+        try:
+            value, extra = fn(llm)
+        except Exception as exc:
+            meta.update(latency_ms=round((time.perf_counter() - started) * 1000), error_type=type(exc).__name__,
+                        message="LLM turn failed or returned invalid output. No mock fallback was used.")
+            append_event(state.run_id, "llm_failed", meta)
+            return None, meta
+        meta.update(extra)
+        meta["latency_ms"] = round((time.perf_counter() - started) * 1000)
+        state.tokens_used += meta.get("total_tokens") or 0
+        append_event(state.run_id, "llm_completed", meta)
+        return value, meta
 
-        failed = [name for name, item in state.tool_attempts.items() if item.status == "failed"]
-        if failed:
-            state.status = "failed"
-            append_event(state.run_id, "investigation_failed", {"failed_tools": failed})
-            return state
+    def _budget_stop(self, state: AgentState) -> str | None:
+        if state.step_count >= MAX_STEPS:
+            return "max_steps"
+        if state.elapsed_s >= MAX_SECONDS:
+            return "time_budget"
+        if state.tokens_used >= MAX_TOKENS:
+            return "token_budget"
+        return None
 
+    def _end_investigation(self, state: AgentState, reason: str) -> AgentState:
+        state.stop_reason = reason
         state.status = "investigated"
-        append_event(state.run_id, "investigation_complete", {"evidence_count": len(state.evidence)})
+        append_event(
+            state.run_id,
+            "investigation_complete",
+            {"evidence_count": len(state.evidence), "steps": state.step_count, "stop_reason": reason,
+             "tokens_used": state.tokens_used, "elapsed_s": round(state.elapsed_s, 2)},
+        )
         return state
 
-    def _add_compact_evidence(self, state: AgentState, source: str, data: dict) -> None:
-        if source == "query_metrics":
-            state.evidence.append(Evidence(source=source, finding=json.dumps(data), severity="warning"))
-        elif source == "query_logs":
-            errors = [e for e in data.get("entries", []) if e.get("level") == "ERROR"]
-            finding = f"{len(errors)} ERROR entries; latest: {errors[-1]['message'] if errors else 'none'}"
-            state.evidence.append(Evidence(source=source, finding=finding, severity="error" if errors else "info"))
-        elif source == "search_runbook":
-            matches = data.get("matches", [])
-            if matches:
-                state.evidence.append(
-                    Evidence(source=source, finding=f"Runbook: {matches[0]['title']} — {matches[0]['excerpt'][:300]}")
-                )
+    def _investigate(self, state: AgentState) -> AgentState:
+        """One turn of the loop. Checkpointed by step(), so it is resumable at turn granularity."""
+        state.status = "investigating"
+        stop = self._budget_stop(state)
+        if stop:
+            return self._end_investigation(state, stop)
+
+        schemas = selectable_tool_schemas()
+        decision, _ = self._llm_call(
+            state, "next_step", lambda llm: llm.next_step(state, schemas, MAX_STEPS - state.step_count)
+        )
+        state.step_count += 1
+        if decision is None:
+            state.bad_decisions += 1
+            return self._end_investigation(state, "llm_unavailable") if state.bad_decisions >= MAX_BAD_DECISIONS else state
+
+        if state.tokens_used >= MAX_TOKENS:
+            # The call that crossed the budget already happened; its tool call does not run.
+            return self._end_investigation(state, "token_budget")
+
+        append_event(
+            state.run_id, "agent_decision",
+            {"step": state.step_count, "action": decision.action, "tool": decision.tool, "args": decision.args, "reason": decision.reason},
+        )
+        if decision.action == "finish":
+            return self._end_investigation(state, "model_finished")
+
+        if decision.tool not in schemas:
+            return self._reject_decision(state, decision, f"'{decision.tool}' is not an available investigation tool")
+        signature = (decision.tool, json.dumps(decision.args, sort_keys=True))
+        if any(s.ok and (s.tool, json.dumps(s.args, sort_keys=True)) == signature for s in state.steps):
+            state.repeat_count += 1
+            self._record_step(state, decision, False, "Duplicate call skipped: this exact call already succeeded", 0)
+            return self._end_investigation(state, "repeated_calls") if state.repeat_count >= MAX_REPEATS else state
+
+        result, attempts = self._call_tool(state, decision.tool, decision.args)
+        if result.ok:
+            summary = summarize_tool_result(decision.tool, result.data)
+            if summary:
+                state.evidence.append(Evidence(source=decision.tool, finding=summary[0], severity=summary[1]))
+            self._record_step(state, decision, True, summary[0] if summary else "ok", attempts)
+        else:
+            self._record_step(state, decision, False, f"{result.error} (after {attempts} attempt(s))", attempts)
+        return state
+
+    def _reject_decision(self, state: AgentState, decision, why: str) -> AgentState:
+        state.bad_decisions += 1
+        self._record_step(state, decision, False, f"Rejected by runtime: {why}", 0)
+        append_event(state.run_id, "decision_rejected", {"tool": decision.tool, "reason": why})
+        return self._end_investigation(state, "bad_decisions") if state.bad_decisions >= MAX_BAD_DECISIONS else state
+
+    def _record_step(self, state: AgentState, decision, ok: bool, observation: str, attempts: int) -> None:
+        state.steps.append(StepRecord(n=state.step_count, tool=str(decision.tool), args=decision.args, ok=ok,
+                                      observation=observation, reason=decision.reason, attempts=attempts))
+
+    def _call_tool(self, state: AgentState, tool: str, args: dict):
+        """Execute with retry/backoff for transient failures; permanent failures return immediately."""
+        started = time.perf_counter()
+        result = None
+        for attempt in range(1, MAX_TOOL_ATTEMPTS + 1):
+            result = execute_tool(tool, args)
+            if result.ok or not result.retryable or attempt == MAX_TOOL_ATTEMPTS:
+                break
+            append_event(state.run_id, "tool_retry", {"tool": tool, "attempt": attempt, "error": result.error})
+            self.sleep(min(2.0, 0.2 * 2 ** (attempt - 1)))
+        append_event(
+            state.run_id, "tool_call",
+            {"tool": tool, "args": args, "ok": result.ok, "attempts": attempt, "error": result.error,
+             "latency_ms": round((time.perf_counter() - started) * 1000)},
+        )
+        return result, attempt
 
     def _diagnose(self, state: AgentState) -> AgentState:
-        memory = _load_memory_for_state(state)
-        diagnosis = generate_diagnosis(state, memory)
+        if not state.evidence:
+            diagnosis = {"diagnosis": f"No usable evidence gathered ({state.stop_reason}); operator investigation required.",
+                         "confidence": 0.0, "proposed_action": "create_ticket"}
+        else:
+            memory = _load_memory_for_state(state)
+            diagnosis, _ = self._llm_call(state, "diagnose", lambda llm: llm.diagnose(state, memory))
+            if diagnosis is None:
+                # Deliberately escalate instead of fabricating a successful model diagnosis.
+                diagnosis = {"diagnosis": "Automated diagnosis failed; operator investigation required.",
+                             "confidence": 0.0, "proposed_action": "create_ticket"}
         state.diagnosis = diagnosis["diagnosis"]
         state.confidence = float(diagnosis["confidence"])
         state.proposed_action = diagnosis.get("proposed_action")
